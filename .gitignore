@@ -1,0 +1,5 @@
+# Hugging Face tokens and credentials
+.huggingface/
+hf_*/
+*.token
+.env
