@@ -2,9 +2,12 @@ import zhipuai
 from zhipuai import ZhipuAI
 from termcolor import colored
 from openai import OpenAI
+import google.generativeai as genai
 
-def call_api(prompt, temperature=1):
-    client = ZhipuAI(api_key="50aa6ea8cb7dec390f35329b8848584c.ZbyeInuAG7hKCExI")
+def call_api_glm(prompt, temperature=1):
+    #client = ZhipuAI(api_key="50aa6ea8cb7dec390f35329b8848584c.ZbyeInuAG7hKCExI")
+    #client = ZhipuAI(api_key="9e12872b9b314a138c19db0a674deac6.YT3cCTU4Lrqsgglo")
+    client = ZhipuAI(api_key="4078bda64bf14bf588ec5e10bad0b645.BeM0YmYkZDCLDuGz")
     response = client.chat.completions.create(
         model="glm-4-plus",
         messages=[
@@ -36,6 +39,18 @@ def call_api_gpt4o(prompt, temperature=1):
     )
     res = chat_completion.choices[0].message.content
     return res
+
+def call_gemini(prompt, temperature=1):
+    # 配置API密钥
+    genai.configure(api_key="AIzaSyDMWCfZxgQYw_8XYVYnDw7ASe--lFoL2l0")
+    
+    # 获取模型
+    model = genai.GenerativeModel('gemini-1.5-pro')
+    
+    # 生成响应
+    response = model.generate_content(prompt)
+    
+    return response.text
 
 if __name__=='__main__':
     '''
@@ -84,6 +99,6 @@ if __name__=='__main__':
     for q in question:
         print(q)
         p = prompt.format(q)
-        res = call_api(p)
+        res = call_api_glm(p)
         print("output: ")
         print(colored(res, 'yellow'))

@@ -4,10 +4,10 @@ import torch
 import random
 import os
 import numpy as np
-from text_retriever import TextRetriver
-from roberta_filter import RobertaFilter
+from .text_retriever import TextRetriver
+from .roberta_filter import RobertaFilter
 #from .bart_mrc import BartMRC
-from longformer_mrc import LongformerMRC
+from .longformer_mrc import LongformerMRC
 #from .deberta_mrc import DeBertaMRC
 
 name2mrc = {

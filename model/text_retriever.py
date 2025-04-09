@@ -11,10 +11,10 @@ class TextRetriver():
             "entity_link": "http://192.168.1.37:9876",
         }
         self.question2id = {}
-        with jsonlines.open("/data/ljx/qd_mcts/data/question2id.jsonl", "r") as f:
+        with jsonlines.open("/data/ljx/qd_with_mcts/data/question2id.jsonl", "r") as f:
             for id, question in f:
                 self.question2id[question] = id
-        self.f = jsonlines.open("/data/ljx/qd_mcts/data/question2id.jsonl", "a")
+        self.f = jsonlines.open("/data/ljx/qd_with_mcts/data/question2id.jsonl", "a")
     
     def retrieve(self, question, program, source="ES", k=100):
         if question in self.question2id:

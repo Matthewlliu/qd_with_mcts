@@ -13,14 +13,18 @@ def get_args():
     
     parser.add_argument('--seed', type=int, default=2381, help='random seed')
     #
-    parser.add_argument('--expand_width', type=int, default=4, help='tree expanding width')
+    parser.add_argument('--expand_width', type=int, default=3, help='tree expanding width')
     parser.add_argument('--simulation_examples', type=int, default=5000)
     parser.add_argument('--rollout_times', type=int, default=100)
     parser.add_argument('--save_iter', type=int, default=100)
     parser.add_argument('--start_iter', type=int, default=0)
+    parser.add_argument('--use_context', default=False, action="store_true")
+    parser.add_argument('--do_soft_valid_check', default=False, action="store_true")
+    parser.add_argument('--save_llm_result_for_debug', default=False, action="store_true")
+    parser.add_argument('--debug_save_path', type=str, default='/data1/lhw/qd_mcts/debug')
     # path
-    parser.add_argument('--raw_data_path', type=str, default='/data/ljx/musique/musique_ans_v1.0_train.jsonl')
-    parser.add_argument('--save_path', type=str, default='/data/ljx/result/qd_mcts')
+    parser.add_argument('--raw_data_path', type=str, default='/data1/ljx/musique/musique_ans_v1.0_train.jsonl')
+    parser.add_argument('--save_path', type=str, default='/data1/lhw/qd_mcts/reward_data')
 
     parser.add_argument('--text_source', type=str, default="ES")
     parser.add_argument('--device', type=str, default="cuda")
@@ -39,7 +43,7 @@ def get_args():
     parser.add_argument('--mrc_max_question_length', type=int, default=150)
     parser.add_argument('--mrc_max_context_length', type=int, default=400)
     parser.add_argument('--mrc_max_length_generate', type=int, default=32)
-    parser.add_argument('--mrc_use_predicted_topk_contexts', type=int, default=3)
+    parser.add_argument('--mrc_use_predicted_topk_contexts', type=int, default=10)
     parser.add_argument('--mrc_supervise_support', default=True, action="store_true")
     parser.add_argument('--mrc_supervise_answerable', default=False, action="store_true")
 
@@ -55,7 +59,8 @@ def get_args():
 def main():
     args = get_args()
     args.device = "cuda" if torch.cuda.is_available() else "cpu"
-    
+    print(args)
+    # exit()
     sm = simulation_model(args)
 
     sm.simulate()

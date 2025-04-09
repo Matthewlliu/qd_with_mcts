@@ -1,23 +1,27 @@
 import os
 from util import subq_decompose, llm_determine_leaf, check_repeating, reorder_index, valid_check
-from util import load_json_line, save_data, insert
+from util import insert
 from model.rollout_model import rollout_model as rollout_model
 import numpy as np
+from termcolor import colored
+import json
+import pandas as pd
+from tqdm import tqdm
 
-class node():
-    def __init__(self, q_list, parent, self_id, if_leaf):
+class Node():
+    def __init__(self, q_list, root_q_id, parent, self_id, if_leaf):
         self.q_list = q_list
+        self.root_q_id = root_q_id
         self.score = 0
         self.child = []
         self.parent = parent
         self.simulation_tree = None
         self.id = self_id
         self.selected_times = 0
-        self.if_leaf = if_leaf #self.determine_leaf()
-
+        self.if_leaf = if_leaf 
+        self.answer = None
     def determine_leaf(self,):
-        return [False]
-        pass
+        return self.if_leaf
 
     def get_child_score(self, p_id):
         return NotImplemented
@@ -39,22 +43,36 @@ class node():
     def score_adjust(self, score):
         pass
 
-class tree_list(node):
-    def __init__(self, question, answer, context, max_layer=4):
-        root_node = node([question], None, 0, [False])
+    def to_json_result(self):
+        return {
+            "id": self.id,
+            "q_list": self.q_list,
+            "root_q_id": self.root_q_id,
+            "answer": self.answer,
+            "score": self.score,
+            "selected_times": self.selected_times,
+            "parent": self.parent,
+            "child": self.child,
+            "if_leaf": self.if_leaf,
+            "simulation_tree": self.simulation_tree
+        }
+
+class TreeList():
+    def __init__(self, question, answer, max_layer=10):
+        root_node = Node([question], 1, None, 0, [False])
         self.list = [root_node]
         self.rollout_times = 0
         self.answer = answer
         self.question = question
-        self.context = context
         self.max_layer = max_layer
-    
+  
     def get_child_score(self, pid):
         pnode = self.list[pid]
         children_id = pnode.get_child()
         score = {}
         for cid in children_id:
             s = self.list[cid].get_score()
+            # HACK: what does this function do?
             s = self.list[cid].score_adjust(s)
             score[cid] = s
         return score
@@ -63,59 +81,53 @@ class tree_list(node):
         pnode = self.list[pid]
         pnode.update(score)
 
-    def expand(self, pid, expand_width):
+    def expand(self, pid, total_expand_width, do_soft_valid_check):
         pnode = self.list[pid]
         leaf_cond = pnode.if_leaf
         cands = [ind for ind, tmp in enumerate(leaf_cond) if tmp is False]
+        # randomly distribute the total expand_width to each candidate
+        expand_width_list = [0] * len(cands)
+        for _ in range(total_expand_width):
+            expand_width_list[np.random.randint(0, len(cands))] += 1
         expand_id_list = [] # all expanded nodes
 
-        for cand in cands: # the index number 
-            subq_pool = []
+        for cand, expand_width in zip(cands, expand_width_list): # the index number of the candidate and the expand width
+            if expand_width == 0:
+                continue
             subq = pnode.q_list[cand]
-            print("expand on:", subq)
-            for it in range(expand_width):
-                res = subq_decompose(subq)
-                #while len(res) != 2:
-                while not valid_check(res):
-                    res = subq_decompose(subq)
-                #print(res)
-                if not check_repeating(res, subq_pool):
-                    subq_pool.append(res)
-                    # reorder q index
-                    #print(q_list)
-                    q_list = insert(pnode.q_list, cand, res)
-                    try:
-                        q_list = reorder_index(q_list, cand)
-                    except:
-                        continue
+            subqs = subq_decompose(subq, expand_width, do_soft_valid_check)
+            for res in subqs:
+                q_list = insert(pnode.q_list, cand, res)
+                try:
+                    q_list, root_q_id = reorder_index(q_list, cand, pnode.root_q_id)
+                except Exception as e:
+                    print(colored("Error: %s" % e, 'red'))
+                    print(colored("subq: %s" % subq, 'red'))
+                    print(colored("res: %s" % res, 'red'))
+                    continue
 
-                    res_leaf = [llm_determine_leaf(r) for r in res]
+                res_leaf = [llm_determine_leaf(r) for r in res]
 
-                    # new node
-                    leaf = insert(leaf_cond, cand, res_leaf)
-                    node_id = len(self.list)
+                # new node
+                leaf = insert(leaf_cond, cand, res_leaf)
+                node_id = len(self.list)
 
-                    new_node = node(q_list, pid, node_id, leaf)
-                    self.list[pid].child.append(node_id)
-                    self.list.append(new_node)
+                new_node = Node(q_list, root_q_id, pid, node_id, leaf)
+                self.list[pid].child.append(node_id)
+                self.list.append(new_node)
 
-                    expand_id_list.append(node_id)
+                expand_id_list.append(node_id)
         return expand_id_list
 
-
-    #def score_adjust(self, score):
-    #    pass
-
-    def tree_policy(self, expand_width):
+    def tree_policy(self, expand_width, do_soft_valid_check):
+        """
+        expand the tree
+        """
         v = 0 # root node
-        tree_depth = 0
-        while all(self.list[v].if_leaf) is False and len(self.list[v].q_list) < self.max_layer: # when dividable
+        while not all(self.list[v].if_leaf) and len(self.list[v].q_list) < self.max_layer: # when dividable
             if len(self.list[v].child) == 0:
-                print("expand on node #%s" % v)
-                self.show(v)
-                cnode = self.expand(v, expand_width) # expand multiple nodes, and randomly return one
+                cnode = self.expand(v, expand_width, do_soft_valid_check) # expand multiple nodes, and randomly return one
                 return cnode
-                
             else:
                 v = self.select_best_child(v, self.list[v].child)
         return v
@@ -131,11 +143,8 @@ class tree_list(node):
                 s = np.inf
             else:
                 s = self.list[c].score / n + coe * np.sqrt(2*np.log(N) / n )
-            
             score[c] = s
-        #print(score)
         sort_score = sorted(score.items(), key=lambda item: item[1])
-        #print(sort_score)
         return sort_score[-1][0]
 
     def update_tree(self, v_l, delta):
@@ -148,60 +157,88 @@ class tree_list(node):
 
     def show(self, pid):
         print("Node #%s" % pid)
-        print("\tQuestion list:", self.list[pid].q_list)
-        print("\tif leaf:", self.list[pid].if_leaf)
-        print("\tchildren:", self.list[pid].child)
-        print("\tscore / times: %s / %s" % (self.list[pid].score, self.list[pid].selected_times) )
-
-    def iterate(self,):
+        print("\tQuestion list:")
+        for is_leaf, q in zip(self.list[pid].if_leaf, self.list[pid].q_list):
+            print(colored("\t\t*" if is_leaf else "\t\t ", 'red'), colored("%s" % q, 'green'))
+        print("\tChildren:", self.list[pid].child)
+        print("\tScore / Times: %s / %s" % (self.list[pid].score, self.list[pid].selected_times) )
+    
+    def iterate(self, func):
+        """
+        Iterate through the tree and print the nodes in a breadth-first manner. 
+        """
         root = [0]
-        self.show(0)
+        func(0)
         while len(root) > 0:
             next_r = []
             for r in root:
                 for c in self.list[r].child:
                     next_r.append(c)
-                    self.show(c)
+                    func(c)
             root = next_r
         
 
 class simulation_model(object):
     def __init__(self, args):
         self.args = args
-        self.raw_data = load_json_line(self.args.raw_data_path)
-        # data sample
-        self.raw_data = [d for d in self.raw_data if int(d['id'][0]) > 2]
-        print(len(self.raw_data))
-        #exit()
+        # self.raw_data = load_json_line(self.args.raw_data_path)
+        # # data sample
+        # # HACK: what does this do?
+        # self.raw_data = [d for d in self.raw_data if int(d['id'][0]) > 2]
+        self.raw_data = pd.read_csv("hf://datasets/google/frames-benchmark/test.tsv", sep="\t")
+        print("length of raw data:", len(self.raw_data))
+        self.do_soft_valid_check = args.do_soft_valid_check
 
-        self.rollout_model = rollout_model(args) #TODO
+        self.rollout_model = rollout_model(args) # TODO
         self.cur_tree = None
         self.his_tree = []
+        self.savedir_for_debug = self.args.debug_save_path if self.args.save_llm_result_for_debug else None
 
     def simulate(self,):
-        print("Starting from iteration #%s" % self.args.start_iter)
-        for exp_id in range(self.args.start_iter, self.args.simulation_examples):
-            entry = self.raw_data[exp_id]
-            question = entry['question']
-            answer = entry['answer']
-            context = entry['paragraphs']
-            #question = "When did Napoleon occupy the city where the mother of the woman who brough Louis XVI style to the court died?"
-            print(question)
-            print(answer)
-            self.cur_tree = tree_list(question, answer, context)
-            #for _ in self.args.rollout_times:
+        for exp_id, entry in tqdm(self.raw_data.iterrows()):
+            question = entry['Prompt']
+            answer = [entry["Answer"]]
+            answer = [a.lower() for a in answer]
+            error_times = 100
+
+            
+            if self.savedir_for_debug:
+                savepath_for_debug = os.path.join(self.savedir_for_debug, f"{exp_id}.txt")
+            else:
+                savepath_for_debug = None
+            
+            self.cur_tree = TreeList(question, answer)
+            self.his_tree = self.cur_tree.list
             while self.cur_tree.rollout_times < self.args.rollout_times:
-                #try:
-                self.run()
-                #except:
-                #    pass
-            # save
+                try:
+                    self.run(savepath_for_debug)
+                    self.his_tree = self.cur_tree.list
+                except Exception as e:
+                    print(colored("Error: %s" % e, 'red'))
+                    self.cur_tree.list = self.his_tree
+                    error_times -= 1
+                    if error_times == 0:
+                        break
+                # self.run(savepath_for_debug)
+                    
+            if error_times == 0:
+                with open(os.path.join(self.args.save_path, f"error_{exp_id}.json"), "w") as f:
+                    json.dump([node.to_json_result() for node in self.cur_tree.list], f, indent=4)
+            else:
+                with open(os.path.join(self.args.save_path, f"tree_{exp_id}.json"), "w") as f:
+                    json.dump([node.to_json_result() for node in self.cur_tree.list], f, indent=4)
+
+            print(colored(exp_id, 'red'))
+            for k,v in entry.items():
+                if not "wikipedia" in k:
+                    print(colored(k, 'red'), v)
+            print("Score: ", colored(self.cur_tree.list[0].score, 'green'))
     
-    def run(self):
+    def run(self, savepath_for_debug):
         # select and expand
-        v_l = self.cur_tree.tree_policy(self.args.expand_width)
-        print("Tree policy: ", v_l)
-        #input()
+        v_l = self.cur_tree.tree_policy(self.args.expand_width, self.do_soft_valid_check)
+        # print("Tree policy: ", v_l)
+        # print("Rollout times: ", self.cur_tree.rollout_times)
 
         # roll out
         if isinstance(v_l, int):
@@ -209,20 +246,23 @@ class simulation_model(object):
         
         delta = []
         for v in v_l:
-            #q = self.cur_tree.list[v].q_list
-            res, q_tree = self.rollout_model.inference(tree=self.cur_tree, node=v) # TODO
+            res, q_tree = self.rollout_model.inference(tree=self.cur_tree, node=v, savepath_for_debug=savepath_for_debug) # TODO
             self.cur_tree.rollout_times += 1
             if self.cur_tree.list[v].simulation_tree is None:
+                # print("root_q_id: ", self.cur_tree.list[v].root_q_id)
+                # for q in q_tree:
+                #     print(q)
+                # print("-"*100)
                 self.cur_tree.list[v].simulation_tree = q_tree
+                self.cur_tree.list[v].answer = res
             delta.append(res) # TODO
 
         # back propagate
-        self.cur_tree.update_tree(v_l, delta)
-
-        self.cur_tree.iterate()
-        input()
-        
-
+        score = [int(d.lower() in self.cur_tree.answer) for d in delta]
+        # for v, d in zip(v_l, score):
+        #     if d == 1:
+        #         print(colored("Correct: %s" % self.cur_tree.list[v].q_list, 'green'))
+        self.cur_tree.update_tree(v_l, score)
 
 if __name__=='__main__':
     pass

@@ -6,7 +6,7 @@ import os
 import numpy as np
 import sys
 #sys.path.append('..')
-from utils import answer_offset_in_context
+from .utils import answer_offset_in_context
 
 class LongformerMRC(nn.Module):
     def __init__(self, args, mode='single-hop'):
